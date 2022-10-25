@@ -43,8 +43,7 @@ def delete_service(service_name, namespace) -> bool:
         k8s_client.delete_namespaced_service(name=service_name, namespace=namespace)
         return True
     except Exception as e:
-        print(f"ERROR: Exception when calling delete service operation: {e}\n")
-        return False
+        raise Exception(f"ERROR: Exception when calling delete service operation: {e}\n")
 
 
 # Function to delete a kubernetes deployment
@@ -55,8 +54,7 @@ def delete_deployment(deployment_name, namespace) -> bool:
         k8s_client.delete_namespaced_deployment(name=deployment_name, namespace=namespace)
         return True
     except Exception as e:
-        print(f"ERROR: Exception when calling delete deployment operation: {e}\n")
-        return False
+        raise Exception(f"ERROR: Exception when calling delete deployment operation: {e}\n")
 
 
 # Function to scale a kubernetes deployment
@@ -66,5 +64,4 @@ def scale_deployment(deployment_name, namespace, new_replica_count) -> bool:
         apps_v1.patch_namespaced_deployment_scale(deployment_name, namespace, {"spec": {"replicas": new_replica_count}})
         return True
     except Exception as e:
-        print(f"ERROR: Exception when calling scale operation: {e}\n")
-        return False
+        raise Exception(f"ERROR: Exception when calling scale operation: {e}\n")

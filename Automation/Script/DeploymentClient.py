@@ -1,5 +1,6 @@
 import concurrent.futures
 import json
+import logging
 import threading
 import time
 
@@ -8,9 +9,13 @@ from kubernetes.stream import stream
 
 import KubernetesHelper
 import Utils
+from Automation.Constant.Constant import *
 
-YAML_FILE_TEMPLATE = '/Users/ritwik.raj/kubernetes/jupyterLab/Automation/Template/jupyterlab.yaml'
-OUTPUT_PATH = '/Users/ritwik.raj/kubernetes/jupyterLab/Automation/Output'
+logging.basicConfig(
+    filename=LOG_OUTPUT_PATH,
+    level=logging.DEBUG,
+    format='%(asctime)s %(lineno)d [%(threadName)s] %(levelname)s %(pathname)s [%(funcName)s] %(message)s'
+)
 
 
 # Todo: 1) Require function to update deployment image
@@ -29,38 +34,45 @@ class DeploymentClient:
         # Both k8s deployment and service will get create from a single yaml file
         properties_map = {'deployment_name': str(self.deployment_name), 'namespace': str(self.namespace),
                           'replica_count': str(self.replica_count), 'image': str(self.image)}
+        logging.debug(f"Property map to generate cluster yaml: {properties_map}")
         k8s_obj_yaml = KubernetesHelper.create_k8s_yaml(
             yaml_template_file=YAML_FILE_TEMPLATE,
             properties_map=properties_map
         )
-
+        logging.debug(f"Generated k8s yaml for the cluster creation: {str(k8s_obj_yaml)}")
         if KubernetesHelper.create_using_yaml(k8s_obj_yaml, self.namespace):
+            logging.debug(
+                f"Resources are created for {self.deployment_name}, waiting for pods to get into Running state")
             timeout_minutes = 1
             timeout = time.time() + 60 * timeout_minutes
             start_time = time.perf_counter()
-            # Timeout in the while loop
+            logging.debug(f"Timeout of {timeout_minutes} minute(s) before marking the cluster creation fail")
             while True:
                 running_pods = self.get_running_pods_in_cluster()
+                logging.debug(f"Number of pods running: {running_pods}")
                 if running_pods == int(self.replica_count):
-                    print(f"INFO: Cluster {self.deployment_name} created successful")
+                    logging.debug(f"Cluster {self.deployment_name} created successful")
                     Utils.Utils.write_to_yaml_file(output_path=OUTPUT_PATH, output_file_name='jupyterlab.yaml',
                                                    k8s_object_yaml=k8s_obj_yaml)
+                    logging.debug("Cluster creation yaml file is written to file")
                     self.is_active = True
                     return True
                 if time.time() > timeout:
                     # Delete the wrongly created cluster
-                    print(f"ERROR: Cluster {self.deployment_name} creation failed")
+                    logging.debug(f"Timeout of {timeout_minutes} completed, marking the cluster creation as failed")
+                    logging.debug(f"Cluster {self.deployment_name} creation failed")
                     # Creating another thread apart from main thread, to delete the wrongly created cluster
+                    logging.debug("Launching another thread to delete wrongly created cluster")
                     t = threading.Thread(target=self.delete_cluster, args=[True])
                     t.start()
                     t.join()
                     return False
                 end_time = time.perf_counter()
-                print(
-                    f"INFO: Waiting for Deployment to become ready, {int(end_time - start_time)} seconds(s) elapsed, timeout is {1 * 60} seconds(s)...")
+                logging.debug(
+                    f"Waiting for Deployment to become ready, {int(end_time - start_time)} seconds(s) elapsed, timeout is {1 * 60} seconds(s)...")
                 time.sleep(5)
         else:
-            print(f"ERROR: Cluster {self.deployment_name} creation failed")
+            logging.debug(f"Cluster {self.deployment_name} creation failed")
             return False
 
     # Function to scale python custer deployment
@@ -76,19 +88,19 @@ class DeploymentClient:
             while True:
                 running_pods = self.get_running_pods_in_cluster()
                 if running_pods == int(new_replica_count):
-                    print(f"INFO: Cluster {self.deployment_name} scaled successful")
+                    print(f"Cluster {self.deployment_name} scaled successful")
                     self.replica_count = new_replica_count
                     # Todo: After successful scaling, install all python libraries in newly created pods
                     return True
                 if time.time() > timeout:
-                    print(f"ERROR: Cluster {self.deployment_name} scaling failed")
+                    print(f"Cluster {self.deployment_name} scaling failed")
                     return False
                 end_time = time.perf_counter()
                 print(
-                    f"INFO: Waiting for scaling on cluster {self.deployment_name} to become ready, {int(end_time - start_time)} seconds(s) elapsed, timeout is {1 * 60} seconds(s)...")
+                    f"Waiting to scale cluster {self.deployment_name}, {int(end_time - start_time)} seconds(s) elapsed, timeout is {1 * 60} seconds(s)...")
                 time.sleep(5)
         else:
-            print(f"ERROR: Cluster {self.deployment_name} scaling failed")
+            print(f"Cluster {self.deployment_name} scaling failed")
             return False
 
     # Function to execute command inside a kubernetes pod
@@ -195,19 +207,18 @@ class DeploymentClient:
     # Function to delete the entire cluster
     def delete_cluster(self, skip_is_active_check=False) -> bool:
         if self.is_active or skip_is_active_check:
-
+            logging.debug("Cluster is active, deleting it!!")
             response_dep, response_svc = False, False
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 response_dep = executor.submit(KubernetesHelper.delete_deployment, self.deployment_name, self.namespace)
                 response_svc = executor.submit(KubernetesHelper.delete_service, self.deployment_name, self.namespace)
-
             if response_dep and response_svc:
                 self.is_active = False
-                print(f"INFO: Cluster {self.deployment_name} is deleted successfully")
+                logging.debug(f"Cluster {self.deployment_name} is deleted successfully")
                 return True
             else:
-                print(f"ERROR: Error while deleting the cluster {self.deployment_name}")
+                logging.debug(f"Error while deleting the cluster {self.deployment_name}")
                 return False
         else:
-            print(f"WARNING: Cluster {self.deployment_name} is already in inactive state")
+            logging.debug(f"Cluster {self.deployment_name} is already in inactive state")
             return False

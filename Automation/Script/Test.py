@@ -1,8 +1,7 @@
 import DeploymentClient
-import KubernetesHelper
 
 if __name__ == "__main__":
-    obj = DeploymentClient.DeploymentClient("jupyterlab", "poc", "3", "jupyterlab:3.2")
+    obj = DeploymentClient.DeploymentClient("jupyterlab", "poc", "3", "jupterlab:3.2")
 
     # m = obj.check_python_package_is_present("pand")
     # print(m)
@@ -14,12 +13,12 @@ if __name__ == "__main__":
 
     # print(obj.replica_count)
 
-    print(f"State: {obj.is_active}")
+    # print(f"State: {obj.is_active}")
 
     s = obj.create_cluster()
-    print(s)
+    # print(s)
 
-    print(f"State: {obj.is_active}")
+    # print(f"State: {obj.is_active}")
 
     # r = KubernetesHelper.delete_service(service_name="jupyterlab", namespace="poc")
     # print(r)
@@ -27,5 +26,7 @@ if __name__ == "__main__":
     # d = KubernetesHelper.delete_deployment(deployment_name="jupyterlab", namespace="poc")
     # print(d)
 
-    e = obj.delete_cluster()
-    print(e)
+    # e = obj.delete_cluster()
+    # print(e)
+
+    # print(f"State: {obj.is_active}")
