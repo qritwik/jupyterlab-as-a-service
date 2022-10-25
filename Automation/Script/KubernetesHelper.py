@@ -9,6 +9,7 @@ def create_props_dic(properties_map):
     return prop_dic
 
 
+# Function to create kubernetes yaml, using template yaml file & properties map
 def create_k8s_yaml(yaml_template_file=None, properties_map=None):
     props_dict = create_props_dic(properties_map=properties_map)
     with open(yaml_template_file) as f:
@@ -19,7 +20,7 @@ def create_k8s_yaml(yaml_template_file=None, properties_map=None):
         return yaml.safe_load_all(data)
 
 
-# Function to create a kubernetes object using yaml file
+# Function to create a kubernetes resource using yaml file
 def create_using_yaml(yaml_obj, namespace) -> bool:
     try:
         config.load_kube_config()
@@ -31,6 +32,30 @@ def create_using_yaml(yaml_obj, namespace) -> bool:
             print(f"ERROR: Cluster with same name already exists\n{e}\n")
         else:
             print(f"ERROR: Exception when calling kubectl apply: {e}\n")
+        return False
+
+
+# Function to delete a kubernetes service
+def delete_service(service_name, namespace) -> bool:
+    try:
+        config.load_kube_config()
+        k8s_client = client.CoreV1Api()
+        k8s_client.delete_namespaced_service(name=service_name, namespace=namespace)
+        return True
+    except Exception as e:
+        print(f"ERROR: Exception when calling delete service operation: {e}\n")
+        return False
+
+
+# Function to delete a kubernetes deployment
+def delete_deployment(deployment_name, namespace) -> bool:
+    try:
+        config.load_kube_config()
+        k8s_client = client.AppsV1Api()
+        k8s_client.delete_namespaced_deployment(name=deployment_name, namespace=namespace)
+        return True
+    except Exception as e:
+        print(f"ERROR: Exception when calling delete deployment operation: {e}\n")
         return False
 
 

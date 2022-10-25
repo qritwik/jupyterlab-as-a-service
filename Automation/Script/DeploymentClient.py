@@ -1,5 +1,6 @@
 import concurrent.futures
 import json
+import threading
 import time
 
 from kubernetes import client, config
@@ -13,15 +14,15 @@ OUTPUT_PATH = '/Users/ritwik.raj/kubernetes/jupyterLab/Automation/Output'
 
 
 # Todo: 1) Require function to update deployment image
-# Todo: 2) Require function to delete existing deployment
 
 class DeploymentClient:
-    def __init__(self, deployment_name, namespace, replica_count, image):
+    def __init__(self, deployment_name, namespace, replica_count, image, is_active=False):
         config.load_kube_config()
         self.deployment_name = deployment_name
         self.namespace = namespace
         self.replica_count = replica_count
         self.image = image
+        self.is_active = is_active
 
     # Function to create python custer deployment
     def create_cluster(self) -> bool:
@@ -44,10 +45,15 @@ class DeploymentClient:
                     print(f"INFO: Cluster {self.deployment_name} created successful")
                     Utils.Utils.write_to_yaml_file(output_path=OUTPUT_PATH, output_file_name='jupyterlab.yaml',
                                                    k8s_object_yaml=k8s_obj_yaml)
+                    self.is_active = True
                     return True
                 if time.time() > timeout:
-                    # Todo: Delete the wrongly created deployment[2]
+                    # Delete the wrongly created cluster
                     print(f"ERROR: Cluster {self.deployment_name} creation failed")
+                    # Creating another thread apart from main thread, to delete the wrongly created cluster
+                    t = threading.Thread(target=self.delete_cluster, args=[True])
+                    t.start()
+                    t.join()
                     return False
                 end_time = time.perf_counter()
                 print(
@@ -58,7 +64,7 @@ class DeploymentClient:
             return False
 
     # Function to scale python custer deployment
-    def scale_cluster(self, new_replica_count):
+    def scale_cluster(self, new_replica_count) -> bool:
         if KubernetesHelper.scale_deployment(
                 deployment_name=self.deployment_name,
                 namespace=self.namespace,
@@ -161,7 +167,7 @@ class DeploymentClient:
             if status == "Running": running_pods_count = running_pods_count + 1
         return running_pods_count
 
-    # Check python package existence in the deployment
+    # Function to check python package existence in the deployment
     def check_python_package_is_present(self, package) -> dict:
         pod_status_map = self.get_pods_and_status_of_deployment()
         pod_name = list(pod_status_map.keys())[0]
@@ -185,3 +191,23 @@ class DeploymentClient:
 
         resp.close()
         return python_package_map
+
+    # Function to delete the entire cluster
+    def delete_cluster(self, skip_is_active_check=False) -> bool:
+        if self.is_active or skip_is_active_check:
+
+            response_dep, response_svc = False, False
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                response_dep = executor.submit(KubernetesHelper.delete_deployment, self.deployment_name, self.namespace)
+                response_svc = executor.submit(KubernetesHelper.delete_service, self.deployment_name, self.namespace)
+
+            if response_dep and response_svc:
+                self.is_active = False
+                print(f"INFO: Cluster {self.deployment_name} is deleted successfully")
+                return True
+            else:
+                print(f"ERROR: Error while deleting the cluster {self.deployment_name}")
+                return False
+        else:
+            print(f"WARNING: Cluster {self.deployment_name} is already in inactive state")
+            return False
