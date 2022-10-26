@@ -1,7 +1,7 @@
 import DeploymentClient
 
 if __name__ == "__main__":
-    obj = DeploymentClient.DeploymentClient("jupyterlab", "poc", "3", "jupterlab:3.2")
+    obj = DeploymentClient.DeploymentClient("jupyterlab-spark", "poc", "3", "jupyterlab-spark:1.0")
 
     # m = obj.check_python_package_is_present("pand")
     # print(m)
