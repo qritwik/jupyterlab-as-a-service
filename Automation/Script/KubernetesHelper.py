@@ -1,5 +1,11 @@
+import json
+import time
+from datetime import datetime
+
 import yaml
 from kubernetes import client, config, utils
+
+from Automation.Constant.Constant import *
 
 
 def create_props_dic(properties_map):
@@ -65,3 +71,20 @@ def scale_deployment(deployment_name, namespace, new_replica_count) -> bool:
         return True
     except Exception as e:
         raise Exception(f"ERROR: Exception when calling scale operation: {e}\n")
+
+# Function to get newly launched pod in the deployment
+def get_newly_launched_pods(deployment_name, namespace) -> list:
+    newly_launched_pods = []
+    response = client.CoreV1Api().list_namespaced_pod(
+        namespace=namespace,
+        label_selector=f"app={deployment_name}",
+        _preload_content=False
+    )
+    data = json.loads(response.data)
+    for obj in data['items']:
+        name = obj['metadata']['name']
+        creation_time = str(obj['metadata']['creationTimestamp'])
+        format_date = datetime.strptime(creation_time, '%Y-%m-%dT%H:%M:%S%z')
+        minute_diff = int((time.time() - format_date.timestamp()) / 60)
+        if minute_diff < FIVE_MINUTES: newly_launched_pods.append(name)
+    return newly_launched_pods

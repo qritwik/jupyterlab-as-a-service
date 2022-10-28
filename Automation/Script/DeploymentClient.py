@@ -14,7 +14,7 @@ from Automation.Constant.Constant import *
 logging.basicConfig(
     filename=LOG_OUTPUT_PATH,
     level=logging.DEBUG,
-    format='%(asctime)s %(lineno)d [%(threadName)s] %(levelname)s %(pathname)s [%(funcName)s] %(message)s'
+    format='%(asctime)s %(lineno)d [%(threadName)s] %(levelname)s %(filename)s [%(funcName)s] %(message)s'
 )
 
 
@@ -81,6 +81,7 @@ class DeploymentClient:
     # Function to scale python custer deployment
     def scale_cluster(self, new_replica_count) -> bool:
         logging.debug(f"Scaling cluster to {new_replica_count} nodes")
+        packages_list = self.get_all_python_package_present_in_cluster()
         if KubernetesHelper.scale_deployment(
                 deployment_name=self.deployment_name,
                 namespace=self.namespace,
@@ -99,7 +100,8 @@ class DeploymentClient:
                 if running_pods == int(new_replica_count):
                     logging.debug(f"Cluster {self.deployment_name} scaled successful")
                     self.replica_count = new_replica_count
-                    # Todo: After successful scaling, install all python libraries in newly created pods
+                    # After successful scaling, install all python libraries in newly created pods
+                    self.install_python_package_after_scaling(packages_list=packages_list)
                     return True
                 if time.time() > timeout:
                     logging.debug(f"Timeout of {timeout_minutes} completed, marking the cluster scaling as failed")
@@ -113,8 +115,21 @@ class DeploymentClient:
             logging.debug(f"Cluster {self.deployment_name} scaling failed")
             return False
 
-    # Function to execute command inside a kubernetes pod
-    def exec_command_in_pod(self, pod_name, command) -> bool:
+    # Function to install list of python packages inside a pod
+    def install_python_packages_in_pod(self, pod_name, packages_list):
+        total_packages = len(packages_list)
+        installed_packages = 0
+        logging.debug(f"{total_packages} packages needs to be installed in newly added pod {pod_name}")
+
+        for package in packages_list:
+            r = self.install_python_package_in_pod(pod_name=pod_name, package=package)
+            if r:
+                installed_packages = installed_packages + 1
+        logging.debug(f"{installed_packages}/{total_packages} python packages installed in pod {pod_name}")
+
+    # Function to install a python package inside a pod
+    def install_python_package_in_pod(self, pod_name, package) -> bool:
+        command = f"pip3 install {package}"
         logging.debug(f"Executing {command} inside the {pod_name}")
         v1 = client.CoreV1Api()
         exec_command = ["/bin/sh", "-c", command]
@@ -140,10 +155,10 @@ class DeploymentClient:
         resp.close()
 
         if resp.returncode != 0:
-            logging.debug(f"Package installation failed inside the pod {pod_name}")
+            logging.debug(f"Package {package} installation failed inside the pod {pod_name}")
             return False
         else:
-            logging.debug(f"Package installation succeeded inside the pod {pod_name}")
+            logging.debug(f"Package {package} installation succeeded inside the pod {pod_name}")
             return True
 
     # Function to install python library in all pods of a kubernetes deployment
@@ -152,16 +167,16 @@ class DeploymentClient:
         pod_status_map = self.get_pods_and_status_of_deployment()
         total_pods_count = len(pod_status_map)
         pods_package_install_count = 0
+
         logging.debug(f"Package needs to be installed in {total_pods_count} pods")
         logging.debug(f"Creating multiple threads to install package for each pods")
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             results = []
             for pod_name in pod_status_map:
-                command = f"pip3 install {package}"
                 if pod_status_map[pod_name] == "Running":
                     logging.debug(f"{pod_name} is in running state, installing python package inside it")
-                    results.append(executor.submit(self.exec_command_in_pod, pod_name, command))
+                    results.append(executor.submit(self.install_python_package_in_pod, pod_name, package))
                 else:
                     logging.debug(f"Pod {pod_name} is not in running status")
 
@@ -175,6 +190,22 @@ class DeploymentClient:
             logging.debug(
                 f"{package} package is installed in {pods_package_install_count}/{total_pods_count} Pods")
         return pods_package_install_count, total_pods_count
+
+    # Function to install python packages on newly launched pods after cluster scaling
+    def install_python_package_after_scaling(self, packages_list) -> None:
+        logging.debug(f"Python packages to be installed: {packages_list}")
+        newly_launched_pods = KubernetesHelper.get_newly_launched_pods(
+            deployment_name=self.deployment_name,
+            namespace=self.namespace)
+
+        logging.debug(f"Installing python packages in {len(newly_launched_pods)} newly launched pods")
+        logging.debug(f"Creating multiple threads to install packages in each pods")
+
+        with concurrent.futures.ThreadPoolExecutor() as executorPool:
+            for pod_name in newly_launched_pods:
+                executorPool.submit(self.install_python_packages_in_pod, pod_name, packages_list)
+
+        logging.debug(f"Python packages are installed in {newly_launched_pods} newly launched pods")
 
     # Check pods and status of a kubernetes deployment
     def get_pods_and_status_of_deployment(self) -> dict:
@@ -199,12 +230,18 @@ class DeploymentClient:
             if status == "Running": running_pods_count = running_pods_count + 1
         return running_pods_count
 
-    # Function to check python package existence in the cluster
-    def check_python_package_is_present_in_cluster(self, package) -> dict:
-        logging.debug(f"Checking for python package {package} in the cluster {self.deployment_name}")
+    # Function to get python package in the cluster, based upon a package name
+    def get_python_package_present_in_cluster(self, package="") -> dict:
+        if package == "":
+            logging.debug(f"Searching for all python packages in the cluster {self.deployment_name}")
+        else:
+            logging.debug(f"Searching for python package {package} in the cluster {self.deployment_name}")
         pod_status_map = self.get_pods_and_status_of_deployment()
         pod_name = list(pod_status_map.keys())[0]
-        logging.debug(f"{package} to be checked in {pod_name}")
+        if package == "":
+            logging.debug(f"All packages to be searched in pod {pod_name}")
+        else:
+            logging.debug(f"{package} to be searched in pod {pod_name}")
         v1 = client.CoreV1Api()
         command = f"pip3 list | grep -i '{package}'"
         exec_command = ["/bin/sh", "-c", command]
@@ -224,8 +261,19 @@ class DeploymentClient:
                 Utils.Utils.extract_python_packages_details(data, python_package_map)
 
         resp.close()
-        logging.debug(f"Package searched: {package}, Matching packages found: {python_package_map}")
+        if package == "":
+            logging.debug(f"Packages found: {python_package_map}")
+        else:
+            logging.debug(f"Package searched: {package}, Matching packages found: {python_package_map}")
         return python_package_map
+
+    # Function to get all python packages in the cluster
+    def get_all_python_package_present_in_cluster(self) -> list:
+        packages_list = []
+        python_package_map = self.get_python_package_present_in_cluster()
+        for name in python_package_map:
+            packages_list.append(f"{name}=={python_package_map[name]}")
+        return packages_list
 
     # Function to delete the entire cluster
     def delete_cluster(self, skip_is_active_check=False) -> bool:
